@@ -12,12 +12,29 @@ const SharedLocations = () => {
     const userQuery = query(sharesRef, orderByChild('viewerEmail'), equalTo(auth.currentUser.email));
     
     const unsubscribe = onValue(userQuery, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const locations = Object.entries(data)
+      const shareData = snapshot.val();
+
+      if (shareData) {
+        const activeShares = Object.entries(shareData)
           .filter(([_, share]) => share.active)
           .map(([id, share]) => ({ id, ...share }));
-        setSharedLocations(locations);
+        
+        // Use the location from the share data
+        activeShares.forEach((share) => {
+          if (share.location) {
+            setSharedLocations(prev => {
+              const filtered = prev.filter(loc => loc.ownerEmail !== share.ownerEmail);
+              return [...filtered, {
+                ...share,
+                location: share.location,
+                lastUpdate: share.lastUpdate || share.timestamp,
+                isOnline: true  // Since location is shared, assume online
+              }];
+            });
+          }
+        });
+      } else {
+        setSharedLocations([]);
       }
     });
 
@@ -70,27 +87,43 @@ const SharedLocations = () => {
       </div>
       
       <div className="h-64 lg:h-80">
-        <MapContainer 
-          center={sharedLocations[0].location} 
-          zoom={13} 
-          style={{ height: '100%', width: '100%' }}
-        >
-          <TileLayer
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution='&copy; OpenStreetMap contributors'
-          />
-          {sharedLocations.map((share) => (
-            <Marker key={share.id} position={share.location}>
-              <Popup>
-                <div className="text-center">
-                  <strong>🛰 {share.ownerEmail}</strong>
-                  <br />
-                  <small>Last seen: {new Date(share.timestamp).toLocaleString()}</small>
-                </div>
-              </Popup>
-            </Marker>
-          ))}
-        </MapContainer>
+        {sharedLocations.length > 0 && sharedLocations[0].location ? (
+          <MapContainer 
+            center={sharedLocations[0].location} 
+            zoom={13} 
+            style={{ height: '100%', width: '100%' }}
+            key={`map-${sharedLocations.length}`}
+          >
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution='&copy; OpenStreetMap contributors'
+              maxZoom={18}
+            />
+            {sharedLocations
+              .filter(share => share.location && Array.isArray(share.location))
+              .map((share) => (
+                <Marker key={share.id} position={share.location}>
+                  <Popup>
+                    <div className="text-center">
+                      <strong>🛰 {share.ownerEmail}</strong>
+                      <br />
+                      <small>
+                        {share.isOnline ? 'Live' : 'Offline'}<br />
+                        Lat: {share.location[0].toFixed(6)}<br />
+                        Lng: {share.location[1].toFixed(6)}<br />
+                        Last update: {new Date(share.lastUpdate || share.timestamp).toLocaleString()}
+                      </small>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))
+            }
+          </MapContainer>
+        ) : (
+          <div className="h-full bg-gray-700/30 rounded-xl flex items-center justify-center">
+            <p className="text-gray-400">Waiting for shared locations...</p>
+          </div>
+        )}
       </div>
       
       <div className="p-4 space-y-2">
@@ -104,7 +137,7 @@ const SharedLocations = () => {
                 <div>
                   <span className="font-medium text-white text-sm">{share.ownerEmail}</span>
                   <div className="text-xs text-gray-400">
-                    {new Date(share.timestamp).toLocaleTimeString()}
+                    Last update: {new Date(share.lastUpdate || share.timestamp).toLocaleString()}
                   </div>
                 </div>
               </div>

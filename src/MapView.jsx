@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import { ref, set, onDisconnect } from 'firebase/database';
+import { ref, set, onDisconnect, query, orderByChild, equalTo, update, get } from 'firebase/database';
 import { database, auth } from './firebase';
 import LocationShare from './LocationShare';
 import L from 'leaflet';
@@ -21,8 +21,9 @@ const MapView = () => {
 
   // Function to handle location success
   const handleLocationSuccess = async (pos) => {
-    const { latitude, longitude } = pos.coords;
+    const { latitude, longitude, accuracy } = pos.coords;
     const newPosition = [latitude, longitude];
+    console.log('Location received:', { latitude, longitude, accuracy });
     setPosition(newPosition);
     setError(null);
     
@@ -45,7 +46,24 @@ const MapView = () => {
 
   // Function to handle location error
   const handleLocationError = (err) => {
-    setError(err.message);
+    console.error('Location error:', err);
+    let errorMessage = err.message;
+
+    switch(err.code) {
+      case err.PERMISSION_DENIED:
+        errorMessage = "Location access denied by user. Please enable location permissions in your browser settings.";
+        break;
+      case err.POSITION_UNAVAILABLE:
+        errorMessage = "Location information is unavailable. Please check your GPS/network connection.";
+        break;
+      case err.TIMEOUT:
+        errorMessage = "Location request timed out. Please try again.";
+        break;
+      default:
+        errorMessage = "An unknown location error occurred. Please try again.";
+    }
+
+    setError(errorMessage);
     setPosition(null);
   };
 
@@ -60,8 +78,8 @@ const MapView = () => {
       // Watch for position changes
       watchId = navigator.geolocation.watchPosition(handleLocationSuccess, handleLocationError, {
         enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 60000,
+        timeout: 30000,
+        maximumAge: 10000, // Reduce cache time for more accurate updates
       });
     } else {
       setError('Geolocation is not supported by this browser.');
@@ -75,6 +93,42 @@ const MapView = () => {
     };
   }, []);
 
+  // Update shared locations every 30 seconds
+  useEffect(() => {
+    if (position) {
+      const updateShares = async () => {
+        try {
+          const sharesQuery = query(ref(database, 'locationShares'), orderByChild('ownerEmail'), equalTo(auth.currentUser.email));
+          const snapshot = await get(sharesQuery);
+          const shares = snapshot.val();
+          if (shares) {
+            Object.entries(shares).forEach(([id, share]) => {
+              if (share.active) {
+                update(ref(database, `locationShares/${id}`), {
+                  ...share,
+                  location: position,
+                  lastUpdate: Date.now()
+                });
+              }
+            });
+          }
+        } catch (error) {
+          console.error('Error updating shared locations:', error);
+        }
+      };
+
+      // Update immediately
+      updateShares();
+
+      // Then update every 30 seconds
+      const interval = setInterval(updateShares, 30000);
+
+      return () => clearInterval(interval);
+    }
+  }, [position]);
+
+
+
   if (error) {
     return (
       <div className="space-y-4">
@@ -85,7 +139,21 @@ const MapView = () => {
             </div>
             <h3 className="text-lg font-bold text-white mb-2">Location Access Required</h3>
             <p className="text-red-400 text-sm mb-1">{error}</p>
-            <p className="text-gray-400 text-xs">Enable GPS access to start tracking</p>
+            <p className="text-gray-400 text-xs mb-4">Enable GPS access and location permissions to start tracking</p>
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={() => window.location.reload()}
+                className="bg-gradient-to-r from-cyan-500 to-blue-500 text-white px-4 py-2 rounded-xl hover:from-cyan-600 hover:to-blue-600 transition-all duration-300 font-medium text-sm"
+              >
+                Retry Location Access
+              </button>
+              <button
+                onClick={() => navigator.geolocation.getCurrentPosition(handleLocationSuccess, handleLocationError)}
+                className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-4 py-2 rounded-xl hover:from-green-600 hover:to-emerald-600 transition-all duration-300 font-medium text-sm"
+              >
+                Get Current Location
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -133,6 +201,13 @@ const MapView = () => {
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
               <span className="text-green-400 text-xs font-medium">LIVE</span>
+              <button
+                onClick={() => navigator.geolocation.getCurrentPosition(handleLocationSuccess, handleLocationError)}
+                className="text-cyan-400 text-xs hover:text-cyan-300 transition-colors"
+                title="Refresh Location"
+              >
+                🔄
+              </button>
             </div>
           </div>
         </div>
@@ -146,13 +221,18 @@ const MapView = () => {
             <TileLayer
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               attribution='&copy; OpenStreetMap contributors'
+              maxZoom={18}
             />
             <Marker position={position}>
               <Popup>
                 <div className="text-center">
                   <strong>🛰 Your Position</strong>
                   <br />
-                  <small>Last update: {new Date().toLocaleTimeString()}</small>
+                  <small>
+                    Lat: {position[0].toFixed(6)}<br />
+                    Lng: {position[1].toFixed(6)}<br />
+                    Last update: {new Date().toLocaleString()}
+                  </small>
                 </div>
               </Popup>
             </Marker>

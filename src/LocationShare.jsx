@@ -15,6 +15,7 @@ const LocationShare = ({ userLocation }) => {
       
       await set(newShareRef, {
         ownerEmail: auth.currentUser.email,
+        ownerUid: auth.currentUser.uid,
         viewerEmail: shareEmail,
         location: userLocation,
         timestamp: Date.now(),

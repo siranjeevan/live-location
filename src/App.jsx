@@ -4,6 +4,7 @@ import { auth } from './firebase';
 import Auth from './Auth';
 import MapView from './MapView';
 import SharedLocations from './SharedLocations';
+import MyShares from './MyShares';
 
 // Main App component
 function App() {
@@ -97,8 +98,9 @@ function App() {
           <div className="order-2 lg:order-1">
             <MapView />
           </div>
-          <div className="order-1 lg:order-2">
+          <div className="order-1 lg:order-2 space-y-6">
             <SharedLocations />
+            <MyShares />
           </div>
         </div>
       </main>
