@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import { ref, set, onDisconnect, query, orderByChild, equalTo, update, get } from 'firebase/database';
 import { database, auth } from './firebase';
@@ -18,14 +18,46 @@ L.Icon.Default.mergeOptions({
 const MapView = () => {
   const [position, setPosition] = useState(null);
   const [error, setError] = useState(null);
+  const lastPositionRef = useRef(null);
+  const positionTimeoutRef = useRef(null);
+  const MIN_DISTANCE_THRESHOLD = 0.0002; // About 20-25 meters (better for mobile)
+
+  // Function to calculate distance between two coordinates
+  const calculateDistance = (pos1, pos2) => {
+    if (!pos1 || !pos2) return 0;
+    const R = 6371; // Earth's radius in kilometers
+    const dLat = (pos2[0] - pos1[0]) * Math.PI / 180;
+    const dLon = (pos2[1] - pos1[1]) * Math.PI / 180;
+    const a =
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(pos1[0] * Math.PI / 180) * Math.cos(pos2[0] * Math.PI / 180) *
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c; // Distance in kilometers
+  };
 
   // Function to handle location success
   const handleLocationSuccess = async (pos) => {
     const { latitude, longitude, accuracy } = pos.coords;
     const newPosition = [latitude, longitude];
-    console.log('Location received:', { latitude, longitude, accuracy });
-    setPosition(newPosition);
-    setError(null);
+
+    // Only update if position changed significantly or no previous position
+    if (!lastPositionRef.current || calculateDistance(lastPositionRef.current, newPosition) > MIN_DISTANCE_THRESHOLD) {
+      // Clear any existing timeout
+      if (positionTimeoutRef.current) {
+        clearTimeout(positionTimeoutRef.current);
+      }
+
+      // Set a small delay to prevent rapid updates
+      positionTimeoutRef.current = setTimeout(() => {
+        console.log('Location updated:', { latitude, longitude, accuracy, distance: lastPositionRef.current ? calculateDistance(lastPositionRef.current, newPosition) : 0 });
+        lastPositionRef.current = newPosition;
+        setPosition(newPosition);
+        setError(null);
+      }, 1000); // 1 second delay
+    } else {
+      console.log('Location unchanged (too close):', { latitude, longitude, accuracy });
+    }
     
     // Update location in Firebase
     try {
@@ -79,7 +111,7 @@ const MapView = () => {
       watchId = navigator.geolocation.watchPosition(handleLocationSuccess, handleLocationError, {
         enableHighAccuracy: true,
         timeout: 30000,
-        maximumAge: 10000, // Reduce cache time for more accurate updates
+        maximumAge: 60000, // Allow more caching to reduce frequent updates
       });
     } else {
       setError('Geolocation is not supported by this browser.');
@@ -89,6 +121,9 @@ const MapView = () => {
     return () => {
       if (watchId !== null) {
         navigator.geolocation.clearWatch(watchId);
+      }
+      if (positionTimeoutRef.current) {
+        clearTimeout(positionTimeoutRef.current);
       }
     };
   }, []);
@@ -120,10 +155,15 @@ const MapView = () => {
       // Update immediately
       updateShares();
 
-      // Then update every 30 seconds
-      const interval = setInterval(updateShares, 30000);
+      // Then update every 60 seconds (less frequent to reduce blinking)
+      const interval = setInterval(updateShares, 60000);
 
-      return () => clearInterval(interval);
+      return () => {
+        clearInterval(interval);
+        if (positionTimeoutRef.current) {
+          clearTimeout(positionTimeoutRef.current);
+        }
+      };
     }
   }, [position]);
 
@@ -212,11 +252,11 @@ const MapView = () => {
           </div>
         </div>
         <div className="h-48 lg:h-80">
-          <MapContainer 
-            center={position} 
-            zoom={15} 
+          <MapContainer
+            center={position}
+            zoom={15}
             style={{ height: '100%', width: '100%' }}
-            key={`map-${position[0]}-${position[1]}`}
+            key={`map-${Math.floor(position[0] * 10000)}-${Math.floor(position[1] * 10000)}`}
           >
             <TileLayer
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

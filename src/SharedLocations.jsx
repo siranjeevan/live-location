@@ -88,11 +88,11 @@ const SharedLocations = () => {
       
       <div className="h-64 lg:h-80">
         {sharedLocations.length > 0 && sharedLocations[0].location ? (
-          <MapContainer 
-            center={sharedLocations[0].location} 
-            zoom={13} 
+          <MapContainer
+            center={sharedLocations[0].location}
+            zoom={13}
             style={{ height: '100%', width: '100%' }}
-            key={`map-${sharedLocations.length}`}
+            key={`shared-map-${sharedLocations.length}`}
           >
             <TileLayer
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
